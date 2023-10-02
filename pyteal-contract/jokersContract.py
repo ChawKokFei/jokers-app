@@ -7,9 +7,10 @@ def approval_program():
     payment_released_key = Bytes("PaymentReleased")
 
     # Define the stages of the delivery process
-    item_dropped_stage = Int(1)
-    item_delivered_stage = Int(2)
-    item_received_stage = Int(3)
+    item_ordered_stage = Int(1)
+    item_dropped_stage = Int(2)
+    item_delivered_stage = Int(3)
+    item_received_stage = Int(4)
 
     handle_optin = Return(Int(1))
     handle_closeout = Return(Int(0))
@@ -18,33 +19,37 @@ def approval_program():
 
     # Define the application call transaction
     on_initial_call = Seq([
-        App.globalPut(stage_key, item_dropped_stage),
-        App.globalPut(payment_released_key, Int(0)),
         Return(Int(1))
     ])
 
-    on_item_delivered = Seq([
-        Assert(App.globalGet(stage_key) == item_dropped_stage),
-        App.globalPut(stage_key, item_delivered_stage),
+    on_item_in_cart = Seq([
+        App.localPut(Txn.sender(), stage_key, item_ordered_stage),
+        App.localPut(Txn.sender(), payment_released_key, Int(0)),
+        Return(Int(1))
+    ])
+
+    on_item_ordered = Seq([
+        Assert(App.localGet(Txn.sender(), stage_key) == item_ordered_stage),
+        App.localPut(Txn.sender(), stage_key, item_dropped_stage),
+        Return(Int(1))
+    ])
+
+    on_item_dropped = Seq([
+        Assert(App.localGet(Txn.sender(), stage_key) == item_dropped_stage),
+        App.localPut(Txn.sender(), stage_key, item_delivered_stage),
         Return(Int(1))
     ])
 
     on_item_received = Seq([
-        Assert(App.globalGet(stage_key) == item_delivered_stage),
-        App.globalPut(stage_key, item_received_stage),
-        Return(Int(1))
-    ])
-
-    on_payment_released = Seq([
-        Assert(App.globalGet(stage_key) == item_received_stage),
-        App.globalPut(stage_key, Int(4)),
-        App.globalPut(payment_released_key, Int(1)),
+        Assert(App.localGet(Txn.sender(), stage_key) == item_delivered_stage),
+        App.localPut(Txn.sender(), stage_key, item_received_stage),
+        App.localPut(Txn.sender(), payment_released_key, Int(1)),
         Return(Int(1))
     ])
 
     reset = Seq([
-        App.globalPut(stage_key, Int(1)),
-        App.globalPut(payment_released_key, Int(0)),
+        App.localPut(Txn.sender(), stage_key, Int(0)),
+        App.localPut(Txn.sender(), payment_released_key, Int(0)),
         Return(Int(1))
     ])
 
@@ -52,13 +57,15 @@ def approval_program():
         Assert(Global.group_size() == Int(1)),
         Cond(
             [Txn.application_args[0] == Bytes(
-                "ItemDropped"), on_item_delivered],
+                "ItemInCart"), on_item_in_cart],
             [Txn.application_args[0] == Bytes(
-                "ItemDelivered"), on_item_received],
+                "ItemDropped"), on_item_ordered],
             [Txn.application_args[0] == Bytes(
-                "ItemReceived"), on_payment_released],
+                "ItemDelivered"), on_item_dropped],
             [Txn.application_args[0] == Bytes(
-                "Reset"), reset]
+                "ItemReceived"), on_item_received],
+            [Txn.application_args[0] == Bytes(
+                "Reset"), reset],
         )
     )
 
